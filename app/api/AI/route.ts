@@ -1,39 +1,84 @@
-import { NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { NextResponse } from "next/server";
+import { GoogleAIFileManager } from "@google/generative-ai/server";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import fs from "fs";
+import path from "path";
+
+export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
-    const { transcript } = await request.json();
+    const { audio, mimeType } = await request.json();
 
-    if (!transcript) {
+    if (!audio || !mimeType) {
       return NextResponse.json(
-        { error: 'Transcript is required' },
+        { error: "Missing audio or mimeType in request body" },
         { status: 400 }
       );
     }
 
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+    // 1️⃣ Save base64 audio to temporary file
+    const buffer = Buffer.from(audio, "base64");
+    const ext = mimeType.split("/")[1] || "webm";
+    const tempPath = path.join("/tmp", `audio_${Date.now()}.${ext}`);
+    fs.writeFileSync(tempPath, buffer);
 
-    const prompt = `Analyze the following patient transcript and identify any symptoms mentioned. Provide a structured list of symptoms found.
+    // 2️⃣ Create SDK instances with API key
+    const apiKey = process.env.GEMINI_API_KEY!;
+    const fileManager = new GoogleAIFileManager(apiKey);
+    
+    // 3️⃣ Upload audio file to Gemini
+    const uploadResponse = await fileManager.uploadFile(tempPath, {
+      mimeType,
+      displayName: "patient_audio",
+    });
+    console.log("✅ File uploaded to Gemini:", uploadResponse.file.uri);
 
-Transcript: ${transcript}
+    // 4️⃣ Wait for file to be processed
+    let file = await fileManager.getFile(uploadResponse.file.name);
+    while (file.state === "PROCESSING") {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      file = await fileManager.getFile(uploadResponse.file.name);
+    }
 
-Please list all symptoms identified in the transcript.`;
+    if (file.state === "FAILED") {
+      throw new Error("File processing failed");
+    }
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const analysis = response.text();
-
-    return NextResponse.json({
-      success: true,
-      symptoms: analysis,
+    // 5️⃣ Initialize Gemini model
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash",
     });
 
-  } catch (error) {
-    console.error('Error analyzing transcript:', error);
+    // 6️⃣ Ask Gemini to transcribe + analyze
+    const prompt = `
+You are a clinical AI assistant.
+Transcribe this patient audio recording.
+Identify key symptoms, possible conditions, and give medical recommendations.
+Return your findings in a clean, structured summary.
+`;
+
+    const result = await model.generateContent([
+      {
+        fileData: {
+          mimeType: uploadResponse.file.mimeType,
+          fileUri: uploadResponse.file.uri,
+        },
+      },
+      { text: prompt },
+    ]);
+
+    const text = result.response.text();
+
+    // 7️⃣ Clean up temporary file
+    fs.unlinkSync(tempPath);
+
+    return NextResponse.json({ success: true, analysis: text });
+  } catch (error: any) {
+    console.error("❌ Gemini Audio Analysis Error:", error);
     return NextResponse.json(
-      { error: 'Failed to analyze transcript' },
+      { error: error.message || "Failed to analyze audio" },
       { status: 500 }
     );
   }
