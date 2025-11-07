@@ -2,6 +2,8 @@
 
 **An AI-powered application for predicting adverse medical events from phone call transcriptions.**
 
+Live Url:https://nextmedi.netlify.app/
+
 This project is a modern web application built with Next.js 14 (App Router) that provides a user interface for analyzing medical call transcripts. It leverages a large language model (like Google's Gemini) via an API to predict potential adverse medical events, assess severity, and provide recommendations based on the call's content.
 
 ## ✨ Features
