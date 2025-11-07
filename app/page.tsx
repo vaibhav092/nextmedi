@@ -28,71 +28,44 @@ export default function MedicalAudioAnalyzer() {
   };
 
   const transcribeAudio = async (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      console.log('🎤 Starting transcription...');
-      
-      const SpeechRecognition =
-        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    console.log('🎤 Starting transcription...');
 
-      if (!SpeechRecognition) {
-        console.error('❌ Speech Recognition not supported');
-        reject(new Error('Speech recognition not supported in this browser'));
-        return;
+    // Validate file type
+    const supportedTypes = ['audio/wav', 'audio/mp3', 'audio/mpeg', 'audio/webm'];
+    if (!supportedTypes.includes(file.type)) {
+      throw new Error(`Unsupported file type: ${file.type}. Please use WAV, MP3, or WebM audio files.`);
+    }
+
+    try {
+      // Convert the file to base64
+      const buffer = await file.arrayBuffer();
+      const base64Audio = btoa(
+        new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+      );
+      
+      // Send to your API endpoint for transcription
+      const response = await fetch('/api/AI', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          audio: base64Audio,
+          mimeType: file.type,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Transcription failed: ${response.statusText}`);
       }
 
-      // Create audio element to play the file
-      const audio = new Audio();
-      audio.src = URL.createObjectURL(file);
-      
-      const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = false;
-      recognition.lang = 'en-US';
-
-      let fullTranscript = '';
-
-      recognition.onstart = () => {
-        console.log('🎙️ Recognition started');
-        audio.play().catch(err => {
-          console.error('❌ Audio play error:', err);
-        });
-      };
-
-      recognition.onresult = (event: any) => {
-        console.log('📝 Recognition result received');
-        const transcript = Array.from(event.results)
-          .map((result: any) => result[0].transcript)
-          .join(' ');
-        fullTranscript = transcript;
-        console.log('✅ Transcript:', transcript);
-      };
-
-      recognition.onerror = (event: any) => {
-        console.error('❌ Recognition error:', {
-          error: event.error,
-          message: event.message
-        });
-        audio.pause();
-        URL.revokeObjectURL(audio.src);
-        reject(new Error(`Speech recognition error: ${event.error}`));
-      };
-
-      recognition.onend = () => {
-        console.log('🏁 Recognition ended');
-        audio.pause();
-        URL.revokeObjectURL(audio.src);
-        
-        if (fullTranscript) {
-          console.log('✅ Final transcript:', fullTranscript);
-          resolve(fullTranscript);
-        } else {
-          console.warn('⚠️ No transcript generated');
-          reject(new Error('No speech detected in audio'));
-        }
-      };
-
-      recognition.start();
-    });
+      const data = await response.json();
+      console.log('✅ Transcription complete');
+      return data.transcript;
+    } catch (error) {
+      console.error('❌ Transcription error:', error);
+      throw error;
+    }
   };
 
   const processAudio = async () => {
@@ -111,31 +84,22 @@ export default function MedicalAudioAnalyzer() {
       console.log('📝 Transcribing audio...');
       const transcribedText = await transcribeAudio(audioFile);
       setTranscript(transcribedText);
-      console.log('✅ Transcription complete:', transcribedText);
-
-      // Send to API
-      console.log('📤 Sending to API...');
-      const response = await fetch('/api/AI', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          transcript: transcribedText,
-          timestamp: new Date().toISOString(),
-        }),
-      });
-
-      console.log('📥 API response status:', response.status);
-
-      if (!response.ok) {
-        console.error('❌ API error:', response.status, response.statusText);
-        throw new Error(`API error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log('✅ API response data:', data);
       
-      setAiResponse(data.analysis || data.message || JSON.stringify(data, null, 2));
-      console.log('✅ Processing complete!');
+      // Log the transcription details
+      console.log('� Transcription Details:', {
+        timestamp: new Date().toISOString(),
+        fileName: audioFile.name,
+        fileType: audioFile.type,
+        fileSize: audioFile.size,
+        transcriptionLength: transcribedText.length,
+        transcription: transcribedText
+      });
+      
+      console.log('✅ Transcription process complete!');
+      
+      // Note: AI analysis will be added later
+      setAiResponse('AI analysis will be implemented in the next phase.');
+      
     } catch (err: any) {
       console.error('❌ Processing error:', err);
       setError(err.message || 'Failed to process audio. Check console for details.');
